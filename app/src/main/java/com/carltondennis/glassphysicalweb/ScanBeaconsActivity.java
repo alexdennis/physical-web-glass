@@ -1,17 +1,42 @@
 package com.carltondennis.glassphysicalweb;
 
 import android.app.Activity;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.content.Context;
+import android.content.Intent;
+import android.graphics.drawable.AnimationDrawable;
 import android.media.AudioManager;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.ParcelUuid;
+import android.os.Parcelable;
+import android.os.SystemClock;
+import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.URLUtil;
 import android.widget.AdapterView;
+import android.widget.Toast;
 
 import com.google.android.glass.media.Sounds;
 import com.google.android.glass.widget.CardBuilder;
 import com.google.android.glass.widget.CardScrollAdapter;
 import com.google.android.glass.widget.CardScrollView;
+
+import org.uribeacon.beacon.UriBeacon;
+import org.uribeacon.scan.compat.ScanRecord;
+import org.uribeacon.scan.compat.ScanResult;
+import org.uribeacon.scan.util.RegionResolver;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * An {@link Activity} showing a tuggable "Hello World!" card.
@@ -23,7 +48,9 @@ import com.google.android.glass.widget.CardScrollView;
  *
  * @see <a href="https://developers.google.com/glass/develop/gdk/touch">GDK Developer Guide</a>
  */
-public class ScanBeaconsActivity extends Activity {
+public class ScanBeaconsActivity extends Activity implements MetadataResolver.MetadataResolverCallback {
+
+    private static final String TAG = "ScanBeaconsActivity";
 
     /**
      * {@link CardScrollView} to use as the main content view.
@@ -35,44 +62,95 @@ public class ScanBeaconsActivity extends Activity {
      */
     private View mView;
 
+    private static final long SCAN_TIME_MILLIS = TimeUnit.SECONDS.toMillis(3);
+    private final BluetoothAdapter.LeScanCallback mLeScanCallback = new LeScanCallback();
+    private BluetoothAdapter mBluetoothAdapter;
+    private HashMap<String, MetadataResolver.UrlMetadata> mUrlToUrlMetadata;
+    private AnimationDrawable mScanningAnimationDrawable;
+    private boolean mIsDemoMode;
+    private boolean mIsScanRunning;
+    private Handler mHandler;
+    private NearbyBeaconsAdapter mNearbyDeviceAdapter;
+    private Parcelable[] mScanFilterUuids;
+//    private SwipeRefreshWidget mSwipeRefreshWidget;
+//    private MdnsUrlDiscoverer mMdnsUrlDiscoverer;
+    private boolean mDebugRangingViewEnabled = false;
+    // Run when the SCAN_TIME_MILLIS has elapsed.
+    private Runnable mScanTimeout = new Runnable() {
+        @Override
+        public void run() {
+//            mScanningAnimationDrawable.stop();
+            scanLeDevice(false);
+//            mMdnsUrlDiscoverer.stopScanning();
+            mNearbyDeviceAdapter.setIsSearching(false);
+            mNearbyDeviceAdapter.sortDevices();
+            mNearbyDeviceAdapter.notifyDataSetChanged();
+//            fadeInListView();
+        }
+    };
+
+    private void initialize() {
+        mUrlToUrlMetadata = new HashMap<>();
+        mHandler = new Handler();
+        mScanFilterUuids = new ParcelUuid[]{UriBeacon.URI_SERVICE_UUID};
+
+//        mMdnsUrlDiscoverer = new MdnsUrlDiscoverer(getActivity(), NearbyBeaconsFragment.this);
+
+//        getActionBar().setTitle(R.string.title_nearby_beacons);
+        mNearbyDeviceAdapter = new NearbyBeaconsAdapter();
+//        setListAdapter(mNearbyDeviceAdapter);
+//        initializeScanningAnimation(rootView);
+//        ListView listView = (ListView) rootView.findViewById(android.R.id.list);
+//        listView.setOnItemLongClickListener(mAdapterViewItemLongClickListener);
+
+//        mIsDemoMode = getArguments().getBoolean("isDemoMode");
+        // Only scan for beacons when not in demo mode
+//        if (mIsDemoMode) {
+//            getActivity().getActionBar().setDisplayHomeAsUpEnabled(true);
+//            MetadataResolver.findDemoUrlMetadata(getActivity(), NearbyBeaconsFragment.this);
+//        } else {
+            initializeBluetooth();
+//        }
+    }
+
+    private void initializeBluetooth() {
+        // Initializes a Bluetooth adapter. For API version 18 and above,
+        // get a reference to BluetoothAdapter through BluetoothManager.
+        final BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+        mBluetoothAdapter = bluetoothManager.getAdapter();
+    }
+
     @Override
     protected void onCreate(Bundle bundle) {
         super.onCreate(bundle);
 
-        mView = buildView();
+        initialize();
+
+//        mView = buildView();
 
         mCardScroller = new CardScrollView(this);
-        mCardScroller.setAdapter(new CardScrollAdapter() {
-            @Override
-            public int getCount() {
-                return 1;
-            }
-
-            @Override
-            public Object getItem(int position) {
-                return mView;
-            }
-
-            @Override
-            public View getView(int position, View convertView, ViewGroup parent) {
-                return mView;
-            }
-
-            @Override
-            public int getPosition(Object item) {
-                if (mView.equals(item)) {
-                    return 0;
-                }
-                return AdapterView.INVALID_POSITION;
-            }
-        });
+        mCardScroller.setAdapter(mNearbyDeviceAdapter);
         // Handle the TAP event.
         mCardScroller.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                // Plays disallowed sound to indicate that TAP actions are not supported.
-                AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-                am.playSoundEffect(Sounds.DISALLOWED);
+                // If we are scanning
+                if (mIsScanRunning) {
+                    // Don't respond to touch events
+                    return;
+                }
+
+                // Get the url for the given item
+                String url = mNearbyDeviceAdapter.getUrlForListItem(position);
+                String siteUrl = mUrlToUrlMetadata.get(url).siteUrl;
+                if (siteUrl != null) {
+                    // Open the url in the browser
+                    openUrlInBrowser(siteUrl);
+                } else {
+                    // Plays disallowed sound to indicate that TAP actions are not supported.
+                    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                    am.playSoundEffect(Sounds.DISALLOWED);
+                }
             }
         });
         setContentView(mCardScroller);
@@ -81,6 +159,8 @@ public class ScanBeaconsActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        scanLeDevice(true);
+//        mMdnsUrlDiscoverer.startScanning();
         mCardScroller.activate();
     }
 
@@ -88,16 +168,239 @@ public class ScanBeaconsActivity extends Activity {
     protected void onPause() {
         mCardScroller.deactivate();
         super.onPause();
+        if (mIsScanRunning) {
+            scanLeDevice(false);
+//            mMdnsUrlDiscoverer.stopScanning();
+        }
     }
 
     /**
      * Builds a Glass styled "Hello World!" view using the {@link CardBuilder} class.
      */
-    private View buildView() {
-        CardBuilder card = new CardBuilder(this, CardBuilder.Layout.TEXT);
+//    private View buildView() {
+//
+//    }
 
-        card.setText(R.string.searching);
-        return card.getView();
+    private class NearbyBeaconsAdapter extends CardScrollAdapter {
+        private boolean mIsSearching;
+        public final RegionResolver mRegionResolver;
+        private final HashMap<String, String> mUrlToDeviceAddress;
+        private List<String> mSortedDevices;
+        private final HashMap<String, Integer> mUrlToTxPower;
+        private Comparator<String> mComparator = new Comparator<String>() {
+            @Override
+            public int compare(String address, String otherAddress) {
+                // Sort by the stabilized region of the device, unless
+                // they are the same, in which case sort by distance.
+                final String nearest = mRegionResolver.getNearestAddress();
+                if (address.equals(nearest)) {
+                    return -1;
+                }
+                if (otherAddress.equals(nearest)) {
+                    return 1;
+                }
+                int r1 = mRegionResolver.getRegion(address);
+                int r2 = mRegionResolver.getRegion(otherAddress);
+                if (r1 != r2) {
+                    return ((Integer) r1).compareTo(r2);
+                }
+                // The two devices are in the same region, sort by device address.
+                return address.compareTo(otherAddress);
+            }
+        };
+
+        NearbyBeaconsAdapter() {
+            mIsSearching = true;
+            mUrlToDeviceAddress = new HashMap<>();
+            mUrlToTxPower = new HashMap<>();
+            mRegionResolver = new RegionResolver();
+            mSortedDevices = new ArrayList<>();
+        }
+
+        public void setIsSearching(boolean isSearching) {
+            mIsSearching = isSearching;
+        }
+
+        public void updateItem(String url, String address, int rssi, int txPower) {
+            mRegionResolver.onUpdate(address, rssi, txPower);
+        }
+
+        public void addItem(String url, String address, int txPower) {
+            mUrlToDeviceAddress.put(url, address);
+            mUrlToTxPower.put(url, txPower);
+        }
+
+        @Override
+        public int getCount() {
+            if (mSortedDevices.size() < 1) {
+                return 1;
+            } else {
+                return mSortedDevices.size();
+            }
+        }
+
+        @Override
+        public String getItem(int i) {
+            if (mSortedDevices.size() < 1) {
+                return "";
+            } else {
+                return mSortedDevices.get(i);
+            }
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            CardBuilder card;
+
+            if (mSortedDevices.size() < 1) {
+                card = new CardBuilder(getApplicationContext(), CardBuilder.Layout.TEXT);
+                card.setText(R.string.searching);
+
+            } else {
+                card = new CardBuilder(getApplicationContext(), CardBuilder.Layout.COLUMNS);
+                // Get the url for the given position
+                String url = getUrlForListItem(position);
+
+                // Get the metadata for this url
+                MetadataResolver.UrlMetadata urlMetadata = mUrlToUrlMetadata.get(url);
+
+                card.setText(urlMetadata.title)
+                    .addImage(urlMetadata.icon)
+                    .setFootnote(urlMetadata.siteUrl);
+
+            }
+            return card.getView();
+
+        }
+
+        @Override
+        public int getPosition(Object item) {
+            if (mSortedDevices.contains(item)) {
+                return mSortedDevices.indexOf(item);
+            }
+            return AdapterView.INVALID_POSITION;
+        }
+
+        public String getUrlForListItem(int i) {
+            String address = getItem(i);
+            for (String url : mUrlToDeviceAddress.keySet()) {
+                if (mUrlToDeviceAddress.get(url).equals(address)) {
+                    return url;
+                }
+            }
+            return null;
+        }
+
+        public void sortDevices() {
+            mSortedDevices = new ArrayList<>(mUrlToDeviceAddress.values());
+            Collections.sort(mSortedDevices, mComparator);
+        }
+
+        public void clear() {
+            mSortedDevices.clear();
+            mUrlToDeviceAddress.clear();
+            notifyDataSetChanged();
+        }
+    }
+
+    @Override
+    public void onUrlMetadataReceived(String url, MetadataResolver.UrlMetadata urlMetadata) {
+        mUrlToUrlMetadata.put(url, urlMetadata);
+//        mNearbyDeviceAdapter.notifyDataSetChanged();
+    }
+
+    public void onDemoUrlMetadataReceived(String url, MetadataResolver.UrlMetadata urlMetadata) {
+//        mUrlToUrlMetadata.put(url, urlMetadata);
+    }
+
+    @Override
+    public void onUrlMetadataIconReceived() {
+        mNearbyDeviceAdapter.notifyDataSetChanged();
+    }
+
+    /**
+     * Callback for LE scan results.
+     */
+    private class LeScanCallback implements BluetoothAdapter.LeScanCallback {
+        @Override
+        public void onLeScan(final BluetoothDevice device, final int rssi, final byte[] scanBytes) {
+            ScanRecord scanRecord = ScanRecord.parseFromBytes(scanBytes);
+            if (leScanMatches(scanRecord)) {
+                final ScanResult scanResult = new ScanResult(device, scanRecord, rssi, SystemClock.elapsedRealtimeNanos());
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        UriBeacon uriBeacon = UriBeacon.parseFromBytes(scanResult.getScanRecord().getBytes());
+                        if ((uriBeacon != null) && (uriBeacon.getUriString() != null)) {
+                            int txPower = uriBeacon.getTxPowerLevel();
+                            String url = uriBeacon.getUriString();
+                            Log.d(TAG, url);
+                            // If we haven't yet seen this url
+                            if (!mUrlToUrlMetadata.containsKey(url)) {
+                                mUrlToUrlMetadata.put(url, null);
+                                mNearbyDeviceAdapter.addItem(url, scanResult.getDevice().getAddress(), txPower);
+                                // Fetch the metadata for this url
+                                MetadataResolver.findUrlMetadata(getApplicationContext(), ScanBeaconsActivity.this, url);
+                            }
+                            // Tell the adapter to update stored data for this url
+                            mNearbyDeviceAdapter.updateItem(url, scanResult.getDevice().getAddress(), scanResult.getRssi(), txPower);
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private void scanLeDevice(final boolean enable) {
+        if (mIsScanRunning != enable) {
+            mIsScanRunning = enable;
+            // If we should start scanning
+            if (enable) {
+                // Stops scanning after the predefined scan time has elapsed.
+                mHandler.postDelayed(mScanTimeout, SCAN_TIME_MILLIS);
+                // Clear any stored url data
+                mUrlToUrlMetadata.clear();
+                mNearbyDeviceAdapter.clear();
+                // Start the scan
+                mBluetoothAdapter.startLeScan(mLeScanCallback);
+                // If we should stop scanning
+            } else {
+                // Cancel the scan timeout callback if still active or else it may fire later.
+                mHandler.removeCallbacks(mScanTimeout);
+                // Stop the scan
+                mBluetoothAdapter.stopLeScan(mLeScanCallback);
+//                mSwipeRefreshWidget.setRefreshing(false);
+            }
+        }
+    }
+
+    private boolean leScanMatches(ScanRecord scanRecord) {
+        if (mScanFilterUuids == null) {
+            return true;
+        }
+        List services = scanRecord.getServiceUuids();
+        if (services != null) {
+            for (Parcelable uuid : mScanFilterUuids) {
+                if (services.contains(uuid)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void openUrlInBrowser(String url) {
+        // Ensure an http prefix exists in the url
+        if (!URLUtil.isNetworkUrl(url)) {
+            url = "http://" + url;
+        }
+        // Route through the proxy server go link
+        url = MetadataResolver.createUrlProxyGoLink(url);
+        // Open the browser and point it to the given url
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setData(Uri.parse(url));
+        startActivity(intent);
     }
 
 }

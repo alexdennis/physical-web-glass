@@ -3,6 +3,7 @@
 
     <string name="app_name">GlassPhysicalWeb</string>
     <string name="title_activity_scan_beacons">Scan for Beacons</string>
-    <string name="searching">Searching for beacons</string>
-
+    <string name="searching">Searching for beacons...</string>
+    <string name="proxy_go_link_base_url">http://url-caster.appspot.com/go?url=</string>
+    <string name="glass_voice_trigger">Scan for beacons</string>
 </resources>
