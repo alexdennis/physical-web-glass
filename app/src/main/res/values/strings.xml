@@ -3,6 +3,6 @@
 
     <string name="app_name">GlassPhysicalWeb</string>
     <string name="title_activity_scan_beacons">Scan for Beacons</string>
-    <string name="hello_world">Hello world!</string>
+    <string name="searching">Searching for beacons</string>
 
 </resources>
