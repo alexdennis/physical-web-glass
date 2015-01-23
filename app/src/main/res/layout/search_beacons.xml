@@ -1,0 +1,17 @@
+<RelativeLayout android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:text="@string/empty_nearby_beacons_list_text"
+        android:textSize="32sp"
+        android:gravity="center"
+        android:drawableTop="@drawable/scanning_animation"
+        android:drawablePadding="24dp"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:id="@id/android:empty"/>
+
+</RelativeLayout>

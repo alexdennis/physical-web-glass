@@ -15,10 +15,12 @@ import android.os.ParcelUuid;
 import android.os.Parcelable;
 import android.os.SystemClock;
 import android.util.Log;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.URLUtil;
 import android.widget.AdapterView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.glass.media.Sounds;
@@ -79,10 +81,9 @@ public class ScanBeaconsActivity extends Activity implements MetadataResolver.Me
     private Runnable mScanTimeout = new Runnable() {
         @Override
         public void run() {
-//            mScanningAnimationDrawable.stop();
+            mScanningAnimationDrawable.stop();
             scanLeDevice(false);
 //            mMdnsUrlDiscoverer.stopScanning();
-            mNearbyDeviceAdapter.setIsSearching(false);
             mNearbyDeviceAdapter.sortDevices();
             mNearbyDeviceAdapter.notifyDataSetChanged();
 //            fadeInListView();
@@ -118,6 +119,13 @@ public class ScanBeaconsActivity extends Activity implements MetadataResolver.Me
         // get a reference to BluetoothAdapter through BluetoothManager.
         final BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
         mBluetoothAdapter = bluetoothManager.getAdapter();
+    }
+
+    private void initializeScanningAnimation(View rootView) {
+        TextView tv = (TextView) rootView.findViewById(android.R.id.empty);
+        //Get the top drawable
+        mScanningAnimationDrawable = (AnimationDrawable) tv.getCompoundDrawables()[1];
+        mScanningAnimationDrawable.start();
     }
 
     @Override
@@ -159,6 +167,9 @@ public class ScanBeaconsActivity extends Activity implements MetadataResolver.Me
     @Override
     protected void onResume() {
         super.onResume();
+        if (mScanningAnimationDrawable != null) {
+            mScanningAnimationDrawable.start();
+        }
         scanLeDevice(true);
 //        mMdnsUrlDiscoverer.startScanning();
         mCardScroller.activate();
@@ -174,15 +185,7 @@ public class ScanBeaconsActivity extends Activity implements MetadataResolver.Me
         }
     }
 
-    /**
-     * Builds a Glass styled "Hello World!" view using the {@link CardBuilder} class.
-     */
-//    private View buildView() {
-//
-//    }
-
     private class NearbyBeaconsAdapter extends CardScrollAdapter {
-        private boolean mIsSearching;
         public final RegionResolver mRegionResolver;
         private final HashMap<String, String> mUrlToDeviceAddress;
         private List<String> mSortedDevices;
@@ -210,15 +213,10 @@ public class ScanBeaconsActivity extends Activity implements MetadataResolver.Me
         };
 
         NearbyBeaconsAdapter() {
-            mIsSearching = true;
             mUrlToDeviceAddress = new HashMap<>();
             mUrlToTxPower = new HashMap<>();
             mRegionResolver = new RegionResolver();
             mSortedDevices = new ArrayList<>();
-        }
-
-        public void setIsSearching(boolean isSearching) {
-            mIsSearching = isSearching;
         }
 
         public void updateItem(String url, String address, int rssi, int txPower) {
@@ -253,8 +251,12 @@ public class ScanBeaconsActivity extends Activity implements MetadataResolver.Me
             CardBuilder card;
 
             if (mSortedDevices.size() < 1) {
-                card = new CardBuilder(getApplicationContext(), CardBuilder.Layout.TEXT);
-                card.setText(R.string.searching);
+                LayoutInflater inflater = getLayoutInflater();
+                View rootView = inflater.inflate(R.layout.search_beacons, parent, false);
+                initializeScanningAnimation(rootView);
+                return rootView;
+//                card = new CardBuilder(getApplicationContext(), CardBuilder.Layout.TEXT);
+//                card.setText(R.string.searching);
 
             } else {
                 card = new CardBuilder(getApplicationContext(), CardBuilder.Layout.COLUMNS);
