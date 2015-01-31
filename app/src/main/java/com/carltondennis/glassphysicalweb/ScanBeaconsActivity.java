@@ -248,30 +248,32 @@ public class ScanBeaconsActivity extends Activity implements MetadataResolver.Me
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
-            CardBuilder card;
 
             if (mSortedDevices.size() < 1) {
                 LayoutInflater inflater = getLayoutInflater();
                 View rootView = inflater.inflate(R.layout.search_beacons, parent, false);
                 initializeScanningAnimation(rootView);
                 return rootView;
-//                card = new CardBuilder(getApplicationContext(), CardBuilder.Layout.TEXT);
-//                card.setText(R.string.searching);
 
             } else {
-                card = new CardBuilder(getApplicationContext(), CardBuilder.Layout.COLUMNS);
+                CardBuilder card = new CardBuilder(getApplicationContext(), CardBuilder.Layout.COLUMNS);
                 // Get the url for the given position
                 String url = getUrlForListItem(position);
 
                 // Get the metadata for this url
                 MetadataResolver.UrlMetadata urlMetadata = mUrlToUrlMetadata.get(url);
 
-                card.setText(urlMetadata.title)
-                    .addImage(urlMetadata.icon)
-                    .setFootnote(urlMetadata.siteUrl);
+                if (urlMetadata == null) {
+                    card.setText("Missing data");
+                } else {
+                    card.setText(urlMetadata.title)
+                        .addImage(urlMetadata.icon)
+                        .setFootnote(urlMetadata.siteUrl);
+                }
 
+                return card.getView();
             }
-            return card.getView();
+
 
         }
 
